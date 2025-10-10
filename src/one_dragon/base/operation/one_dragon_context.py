@@ -87,42 +87,41 @@ class OneDragonContext(ContextEventBus, OneDragonEnvContext):
         self.ready_for_application: bool = False  # 初始化完成 可以运行应用了
 
     def init(self) -> None:
-        if not self._init_lock.acquire(blocking=False):
-            return
+        with thread_utils.try_acquire(self._init_lock, blocking=False) as acquired:
+            if not acquired:
+                return
 
-        try:
-            self.ready_for_application = False
+            try:
+                self.ready_for_application = False
 
-            if self.custom_config.ui_language == UILanguageEnum.AUTO.value.value:
-                i18_utils.detect_and_set_default_language()
-            else:
-                i18_utils.update_default_lang(self.custom_config.ui_language)
+                if self.custom_config.ui_language == UILanguageEnum.AUTO.value.value:
+                    i18_utils.detect_and_set_default_language()
+                else:
+                    i18_utils.update_default_lang(self.custom_config.ui_language)
 
-            log_utils.set_log_level(logging.DEBUG if self.env_config.is_debug else logging.INFO)
+                log_utils.set_log_level(logging.DEBUG if self.env_config.is_debug else logging.INFO)
 
-            self.init_ocr()
+                self.init_ocr()
 
-            self.screen_loader.load_all()
+                self.screen_loader.load_all()
 
-            # 账号实例层级的配置 不是应用特有的配置
-            self.load_instance_config()
+                # 账号实例层级的配置 不是应用特有的配置
+                self.load_instance_config()
 
-            # 初始化控制器
-            self.init_controller()
+                # 初始化控制器
+                self.init_controller()
 
-            self.init_for_application()
+                self.init_for_application()
 
-            self.ready_for_application = True
+                self.ready_for_application = True
 
-            self.run_context.check_and_update_all_run_record(self.current_instance_idx)
+                self.run_context.check_and_update_all_run_record(self.current_instance_idx)
 
-            self.gh_proxy_service.update_proxy_url()
+                self.gh_proxy_service.update_proxy_url()
 
-            self.init_others()
-        except Exception:
-            log.error('识别连携技出错', exc_info=True)
-        finally:
-            self._init_lock.release()
+                self.init_others()
+            except Exception:
+                log.error('初始化失败', exc_info=True)
 
     def init_controller(self) -> None:
         """
