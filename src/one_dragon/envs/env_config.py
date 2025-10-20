@@ -350,6 +350,18 @@ class EnvConfig(YamlConfig):
         self.update('is_debug', new_value)
 
     @property
+    def yaml_dev_mode(self) -> bool:
+        """
+        Returns:
+            YAML开发者模式（开启后跳过git读取，直接从磁盘读取以支持热修改）
+        """
+        return self.get('yaml_dev_mode', False)
+
+    @yaml_dev_mode.setter
+    def yaml_dev_mode(self, new_value: bool) -> None:
+        self.update('yaml_dev_mode', new_value)
+
+    @property
     def copy_screenshot(self) -> bool:
         """
         截图后是否复制到剪贴板

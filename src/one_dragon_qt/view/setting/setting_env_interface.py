@@ -48,6 +48,11 @@ class SettingEnvInterface(VerticalScrollInterface):
         self.debug_opt.value_changed.connect(lambda: self.ctx.init_by_config())
         basic_group.addSettingCard(self.debug_opt)
 
+        self.yaml_dev_mode_opt = SwitchSettingCard(
+            icon=FluentIcon.EDIT, title='YAML开发者模式', content='开启后跳过 Git 读取，直接从磁盘加载 YAML，可以热重载'
+        )
+        basic_group.addSettingCard(self.yaml_dev_mode_opt)
+
         self.copy_screenshot_opt = SwitchSettingCard(
             icon=FluentIcon.CAMERA, title='复制截图到剪贴板',
             content='按下截图按键时，自动将截图复制到剪贴板'
@@ -180,6 +185,7 @@ class SettingEnvInterface(VerticalScrollInterface):
         VerticalScrollInterface.on_interface_shown(self)
 
         self.debug_opt.init_with_adapter(self.ctx.env_config.get_prop_adapter('is_debug'))
+        self.yaml_dev_mode_opt.init_with_adapter(self.ctx.env_config.get_prop_adapter('yaml_dev_mode'))
         self.copy_screenshot_opt.init_with_adapter(self.ctx.env_config.get_prop_adapter('copy_screenshot'))
         self.ocr_cache_opt.init_with_adapter(self.ctx.env_config.get_prop_adapter('ocr_cache'))
 
