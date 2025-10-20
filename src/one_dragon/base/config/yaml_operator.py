@@ -3,10 +3,14 @@ import sys
 from typing import Optional
 
 import yaml
+import time
 
+from one_dragon.utils import os_utils
 from one_dragon.utils.log_utils import log
 
 cached_yaml_data: dict[str, tuple[float, dict]] = {}
+cached_git_yaml_data: dict[str, dict] = {}  # 缓存从 git 读取的 yaml: {file_path: data}
+_git_service_cache: Optional[object] = None  # 缓存 GitService 实例，避免循环依赖
 
 
 def get_temp_config_path(file_path: str) -> str:
@@ -20,16 +24,113 @@ def get_temp_config_path(file_path: str) -> str:
             return mei_path
     return file_path
 
+
+def read_yaml_from_git(file_path: str) -> Optional[dict]:
+    """
+    从 git HEAD 中读取 yaml 文件内容
+
+    :param file_path: 文件的绝对路径
+    :return: 解析后的 yaml 数据，失败时返回 None
+    """
+    global _git_service_cache
+
+    start = time.perf_counter()
+    attempted = False
+
+    try:
+        # 检查是否在 git 仓库中
+        work_dir = os_utils.get_work_dir()
+        git_dir = os.path.join(work_dir, '.git')
+        if not os.path.exists(git_dir):
+            return None
+
+        # 计算相对路径
+        try:
+            relative_path = os.path.relpath(file_path, work_dir)
+            # 确保使用正斜杠（git 标准）
+            relative_path = relative_path.replace(os.sep, '/')
+        except ValueError:
+            # 文件不在工作目录中
+            return None
+
+        # 延迟导入避免循环依赖
+        if _git_service_cache is None:
+            from one_dragon.envs.git_service import GitService
+            from one_dragon.envs.env_config import EnvConfig
+            from one_dragon.envs.project_config import ProjectConfig
+
+            # 直接从文件读取配置，不通过 YamlOperator
+            project_config_path = os.path.join(work_dir, 'config', 'project.yml')
+            env_config_path = os.path.join(work_dir, 'config', 'env.yml')
+
+            # 简单的直接读取，避免循环
+            project_data = {}
+            env_data = {}
+
+            if os.path.exists(project_config_path):
+                with open(project_config_path, 'r', encoding='utf-8') as f:
+                    project_data = yaml.safe_load(f) or {}
+
+            if os.path.exists(env_config_path):
+                with open(env_config_path, 'r', encoding='utf-8') as f:
+                    env_data = yaml.safe_load(f) or {}
+
+            # 手动创建配置对象
+            project_config = ProjectConfig()
+            project_config.data = project_data
+
+            env_config = EnvConfig()
+            env_config.data = env_data
+
+            _git_service_cache = GitService(project_config, env_config)
+
+        # 检查缓存
+        attempted = True
+        cached = cached_git_yaml_data.get(file_path)
+        if cached is not None:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            log.debug(f"从 git 缓存加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
+            return cached
+
+        # 从 git 中获取文件内容
+        content = _git_service_cache.checkout_file_from_tree(relative_path)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        if content is None:
+            log.debug(f"从 git HEAD 未包含文件: {file_path} (took {elapsed_ms:.3f} ms)")
+            return None
+
+        # 解析 yaml
+        data = yaml.safe_load(content)
+
+        # 缓存数据
+        cached_git_yaml_data[file_path] = data
+
+        log.debug(f"从 git HEAD 加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
+        return data
+
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        if attempted:
+            log.debug(f'从 git 读取文件失败: {exc} (took {elapsed_ms:.3f} ms)')
+        else:
+            log.debug(f'从 git 读取文件失败: {exc}')
+        return None
+
+
 def read_cache_or_load(file_path: str):
+    start = time.perf_counter()
     cached = cached_yaml_data.get(file_path)
     last_modify = os.path.getmtime(file_path)
     if cached is not None and cached[0] == last_modify:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        log.debug(f"从缓存加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
         return cached[1]
 
     with open(file_path, 'r', encoding='utf-8') as file:
-        log.debug(f"加载yaml: {file_path}")
         data = yaml.safe_load(file)
         cached_yaml_data[file_path] = (last_modify, data)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        log.debug(f"从磁盘加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
         return data
 
 
@@ -51,11 +152,19 @@ class YamlOperator:
 
     def __read_from_file(self) -> None:
         """
-        从yml文件中读取数据
+        从yml文件中读取数据，优先从 git HEAD 读取
         :return:
         """
         if self.file_path is None:
             return
+
+        # 优先从 git HEAD 读取
+        git_data = read_yaml_from_git(self.file_path)
+        if git_data is not None:
+            self.data = git_data
+            return
+
+        # git 读取失败，从文件系统读取
         if not os.path.exists(self.file_path):
             return
 
