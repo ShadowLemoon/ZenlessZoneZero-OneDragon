@@ -68,8 +68,6 @@ class GitService:
                 with contextlib.suppress(Exception):
                     settings.set_search_path(level, '')
 
-        log.info('已禁用系统/用户级 git config 搜索路径，仅保留仓库级配置')
-
     def _open_repo(self, refresh: bool = False) -> pygit2.Repository:
         """打开仓库（带缓存）"""
         if refresh:
@@ -644,6 +642,69 @@ class GitService:
                     break
 
         return latest_stable, latest_beta
+
+    def checkout_file_from_tree(self, relative_path: str, ref: str | None = None) -> str | None:
+        """
+        从 git 文件树中直接获取文件内容
+
+        :param relative_path: 文件的相对路径（相对于仓库根目录）
+        :param ref: 引用名称（分支名、tag、commit ID等），默认为当前 HEAD
+        :return: 文件内容（字符串），获取失败时返回 None
+        """
+
+        try:
+            repo = self._open_repo()
+
+            # 确定要使用的提交对象
+            if ref is None:
+                # 使用当前 HEAD
+                commit = repo.head.peel()
+            else:
+                # 解析引用
+                try:
+                    obj = repo.revparse_single(ref)
+                    if isinstance(obj, pygit2.Commit):
+                        commit = obj
+                    elif isinstance(obj, pygit2.Tag):
+                        commit = obj.peel(pygit2.Commit)
+                    else:
+                        commit = obj.peel(pygit2.Commit)
+                except Exception as exc:
+                    log.error(f'解析引用 {ref} 失败: {exc}')
+                    return None
+
+            # 获取提交的树对象
+            tree = commit.tree
+
+            # 在树中查找文件
+            try:
+                entry = tree[relative_path]
+            except KeyError:
+                return None
+
+            # 获取文件对象
+            blob = repo.get(entry.id)
+            if not isinstance(blob, pygit2.Blob):
+                log.error(f'{relative_path} 不是一个文件')
+                return None
+
+            # 读取文件内容
+            try:
+                # 尝试以 UTF-8 解码
+                content = blob.data.decode('utf-8')
+            except UnicodeDecodeError:
+                # 如果解码失败，尝试其他编码
+                try:
+                    content = blob.data.decode('gbk')
+                except UnicodeDecodeError:
+                    log.error(f'无法解码文件 {relative_path}')
+                    return None
+
+            return content
+
+        except Exception as exc:
+            log.error(f'从 git 树中获取文件失败: {exc}', exc_info=True)
+            return None
 
 
 def __fetch_latest_code():
