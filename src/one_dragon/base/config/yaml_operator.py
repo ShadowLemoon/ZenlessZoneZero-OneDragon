@@ -58,29 +58,9 @@ def read_yaml_from_git(file_path: str) -> Optional[dict]:
             from one_dragon.envs.env_config import EnvConfig
             from one_dragon.envs.project_config import ProjectConfig
 
-            # 直接从文件读取配置，不通过 YamlOperator
-            project_config_path = os.path.join(work_dir, 'config', 'project.yml')
-            env_config_path = os.path.join(work_dir, 'config', 'env.yml')
-
-            # 简单的直接读取，避免循环
-            project_data = {}
-            env_data = {}
-
-            if os.path.exists(project_config_path):
-                with open(project_config_path, 'r', encoding='utf-8') as f:
-                    project_data = yaml.safe_load(f) or {}
-
-            if os.path.exists(env_config_path):
-                with open(env_config_path, 'r', encoding='utf-8') as f:
-                    env_data = yaml.safe_load(f) or {}
-
-            # 手动创建配置对象
+            # 创建配置对象
             project_config = ProjectConfig()
-            project_config.data = project_data
-
             env_config = EnvConfig()
-            env_config.data = env_data
-
             _git_service_cache = GitService(project_config, env_config)
 
         # 检查缓存
