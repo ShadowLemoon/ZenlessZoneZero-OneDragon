@@ -8,8 +8,7 @@ import time
 from one_dragon.utils import os_utils
 from one_dragon.utils.log_utils import log
 
-cached_yaml_data: dict[str, tuple[float, dict]] = {}
-cached_git_yaml_data: dict[str, dict] = {}  # 缓存从 git 读取的 yaml: {file_path: data}
+cached_yaml_data: dict[str, dict] = {}  # yaml 缓存: {file_path: data}
 _git_service_cache: Optional[object] = None  # 缓存 GitService 实例，避免循环依赖
 
 
@@ -86,7 +85,7 @@ def read_yaml_from_git(file_path: str) -> Optional[dict]:
 
         # 检查缓存
         attempted = True
-        cached = cached_git_yaml_data.get(file_path)
+        cached = cached_yaml_data.get(file_path)
         if cached is not None:
             elapsed_ms = (time.perf_counter() - start) * 1000
             log.debug(f"从 git 缓存加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
@@ -103,7 +102,7 @@ def read_yaml_from_git(file_path: str) -> Optional[dict]:
         data = yaml.safe_load(content)
 
         # 缓存数据
-        cached_git_yaml_data[file_path] = data
+        cached_yaml_data[file_path] = data
 
         log.debug(f"从 git HEAD 加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
         return data
@@ -120,15 +119,14 @@ def read_yaml_from_git(file_path: str) -> Optional[dict]:
 def read_cache_or_load(file_path: str):
     start = time.perf_counter()
     cached = cached_yaml_data.get(file_path)
-    last_modify = os.path.getmtime(file_path)
-    if cached is not None and cached[0] == last_modify:
+    if cached is not None:
         elapsed_ms = (time.perf_counter() - start) * 1000
         log.debug(f"从缓存加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
-        return cached[1]
+        return cached
 
     with open(file_path, 'r', encoding='utf-8') as file:
         data = yaml.safe_load(file)
-        cached_yaml_data[file_path] = (last_modify, data)
+        cached_yaml_data[file_path] = data
         elapsed_ms = (time.perf_counter() - start) * 1000
         log.debug(f"从磁盘加载 yaml: {file_path} (took {elapsed_ms:.3f} ms)")
         return data
@@ -152,19 +150,26 @@ class YamlOperator:
 
     def __read_from_file(self) -> None:
         """
-        从yml文件中读取数据，优先从 git HEAD 读取
+        从yml文件中读取数据，优先级：缓存 > git HEAD > 磁盘
         :return:
         """
         if self.file_path is None:
             return
 
-        # 优先从 git HEAD 读取
+        # 1. 优先检查缓存
+        cached = cached_yaml_data.get(self.file_path)
+        if cached is not None:
+            self.data = cached
+            log.debug(f"从缓存读取配置: {self.file_path}")
+            return
+
+        # 2. 尝试从 git HEAD 读取
         git_data = read_yaml_from_git(self.file_path)
         if git_data is not None:
             self.data = git_data
             return
 
-        # git 读取失败，从文件系统读取
+        # 3. 从文件系统读取
         if not os.path.exists(self.file_path):
             return
 
