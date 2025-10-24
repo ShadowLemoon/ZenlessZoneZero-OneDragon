@@ -5,7 +5,7 @@ dist/
 .vscode/
 __pycache__/
 deploy/build/
-deploy/dist/
+deploy/*dist/
 .env
 recording.jsonl
 QWEN.md

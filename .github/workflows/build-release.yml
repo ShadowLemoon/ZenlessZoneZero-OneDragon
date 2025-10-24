@@ -126,7 +126,8 @@ jobs:
         .\.venv\Scripts\Activate.ps1
         cd deploy
         pyinstaller "OneDragon-Installer.spec"
-        pyinstaller "OneDragon-Launcher.spec"
+        nuitka --onefile --windows-icon-from-ico=..\assets\ui\logo.ico --output-filename=OneDragon-Launcher.exe ..\src\zzz_od\win_exe\launcher.py
+        mv OneDragon-Launcher.exe dist\OneDragon-Launcher.exe
 
     - name: Bundle dependencies into wheels
       shell: pwsh
