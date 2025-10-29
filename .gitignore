@@ -61,6 +61,7 @@ config/world_patrol_route_list/*
 .debug/
 .conda/
 .venv/
+.runtime/
 notice_cache/
 
 # 需自行下载的模型文件
