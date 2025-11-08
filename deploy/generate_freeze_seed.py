@@ -27,7 +27,7 @@ def get_src_roots(src_dir: Path) -> list[Path]:
     自动扫描 src/ 下所有一级子文件夹
     """
     if not src_dir.exists():
-        print(f"[warn] 源码目录不存在: {src_dir}")
+        print(f"[warn] Source directory does not exist: {src_dir}")
         return []
 
     src_roots = []
@@ -67,10 +67,10 @@ def collect_imports_from_file(py: Path, repo_root: Path) -> tuple[set[str], dict
         src = py.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(src, filename=str(py))
     except SyntaxError as e:
-        print(f"[warn] 语法错误 {py.relative_to(repo_root)}: {e}")
+        print(f"[warn] Syntax error {py.relative_to(repo_root)}: {e}")
         return imports, from_imports
     except Exception as e:
-        print(f"[warn] 解析失败 {py.relative_to(repo_root)}: {e}")
+        print(f"[warn] Parsing failed {py.relative_to(repo_root)}: {e}")
         return imports, from_imports
 
     for node in ast.walk(tree):
@@ -120,7 +120,7 @@ def scan_all_imports(src_roots: list[Path], repo_root: Path, local_pkg_names: se
     for root in src_roots:
         py_files.extend(root.rglob("*.py"))
 
-    print(f"[seed] 扫描 {len(py_files)} 个 Python 文件...")
+    print(f"Scanning {len(py_files)} Python files...")
 
     # 解析所有文件的导入
     for py in py_files:
@@ -148,7 +148,7 @@ def scan_all_imports(src_roots: list[Path], repo_root: Path, local_pkg_names: se
             names = sorted(all_from_imports[module])
             statements.append(f"from {module} import {', '.join(names)}")
 
-    print(f"[seed] 发现 {len(statements)} 个外部依赖（标准库 + 第三方库）")
+    print(f"Found {len(statements)} external dependencies")
     return statements
 
 
@@ -162,7 +162,7 @@ def write_seed_script(seed_file: Path, mods: list[str], repo_root: Path) -> None
         repo_root: 仓库根目录
     """
     if not mods:
-        print("[seed] 警告: 没有找到任何外部依赖")
+        print("[warn] No external dependencies found")
         seed_file.write_text("# AUTO-GENERATED — DO NOT EDIT\npass\n", encoding="utf-8")
         return
 
@@ -174,7 +174,7 @@ def write_seed_script(seed_file: Path, mods: list[str], repo_root: Path) -> None
         content += f"    {mod}\n"
 
     seed_file.write_text(content, encoding="utf-8")
-    print(f"[seed] 写入 -> {seed_file.relative_to(repo_root)} ({len(mods)} 个导入)")
+    print(f"Writing -> {seed_file.relative_to(repo_root)} ({len(mods)} imports)")
 
 
 def main():
@@ -182,10 +182,10 @@ def main():
     src_roots = get_src_roots(SRC_DIR)
 
     if not src_roots:
-        print("[ERROR] 未找到任何源码目录")
+        print("[ERROR] No source directories found")
         return
 
-    print(f"[seed] 发现 {len(src_roots)} 个源码包: {', '.join(r.name for r in src_roots)}")
+    print(f"Found {len(src_roots)} source packages: {', '.join(r.name for r in src_roots)}")
 
     local_pkg_names = get_local_package_names(src_roots)
 
@@ -193,7 +193,7 @@ def main():
     mods = scan_all_imports(src_roots, REPO_ROOT, local_pkg_names)
     write_seed_script(SEED_FILE, mods, REPO_ROOT)
 
-    print(f"[seed] 完成！")
+    print("Done!")
 
 
 if __name__ == "__main__":
