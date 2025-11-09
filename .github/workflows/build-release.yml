@@ -126,7 +126,6 @@ jobs:
       run: |
         .\.venv\Scripts\Activate.ps1
         cd deploy
-        uv run generate_freeze_seed.py
         uv run pyinstaller --noconfirm --clean "OneDragon-Installer.spec"
         uv run pyinstaller --noconfirm --clean "OneDragon-Launcher.spec"
 
