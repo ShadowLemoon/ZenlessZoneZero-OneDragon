@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 a = Analysis(
-    ['..\\src\\zzz_od\\win_exe\\launcher.py', 'freeze_seed.py'],
+    ['launcher.py', 'freeze_seed.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -16,7 +16,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['hook_path_inject.py'],
-    excludes=['one_dragon', 'one_dragon.*', 'one_dragon_qt', 'one_dragon_qt.*', 'onnxocr', 'zzz_od', 'zzz_od.*'],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
