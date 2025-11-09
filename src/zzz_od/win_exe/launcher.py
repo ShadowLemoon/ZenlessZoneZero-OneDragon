@@ -23,12 +23,26 @@ class ZLauncher(ExeLauncher):
         import webbrowser
 
         try:
-            from zzz_od.gui import app
+            from zzz_od.gui.app import AppWindow
             from PySide6.QtCore import Qt
             from PySide6.QtWidgets import QApplication
             from qfluentwidgets import setTheme, Theme
             from zzz_od.context.zzz_context import ZContext
-        except Exception as e:
+
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)   # 隐藏
+                ctypes.windll.kernel32.FreeConsole()       # 脱离控制台
+
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+            app = QApplication(sys.argv)
+            app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
+
+            _ctx = ZContext()
+
+        except Exception:
             stack_trace = traceback.format_exc()
 
             # 显示错误弹窗，询问用户是否打开排障文档
@@ -43,19 +57,11 @@ class ZLauncher(ExeLauncher):
 
             sys.exit(1)
 
-        QApplication.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-        )
-        qt_app = QApplication(sys.argv)
-        qt_app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
-
-        _ctx = ZContext()
-
         # 设置主题
         setTheme(Theme[_ctx.custom_config.theme.upper()])
 
         # 创建并显示主窗口
-        w = app.AppWindow(_ctx)
+        w = AppWindow(_ctx)
 
         w.show()
         w.activateWindow()
@@ -64,9 +70,11 @@ class ZLauncher(ExeLauncher):
         _ctx.init_async()
 
         # 启动应用程序事件循环
-        qt_app.exec()
+        quit_code = app.exec()
 
         _ctx.after_app_shutdown()
+
+        sys.exit(quit_code)
 
 
 if __name__ == '__main__':
