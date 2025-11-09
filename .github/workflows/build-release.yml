@@ -141,6 +141,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Launcher
+        include-hidden-files: true
         path: deploy/dist/OneDragon-Launcher/
 
     - name: Upload Dist
@@ -148,6 +149,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: dist
+        include-hidden-files: true
         if-no-files-found: error
         path: deploy/dist
 
@@ -243,8 +245,10 @@ jobs:
         Invoke-WebRequest -Uri "https://github.com/OneDragon-Anything/OneDragon-Env/releases/download/ZenlessZoneZero-OneDragon/MinGit.zip" -OutFile "$envDir/MinGit.zip"
         Invoke-WebRequest -Uri "https://github.com/OneDragon-Anything/OneDragon-Env/releases/download/ZenlessZoneZero-OneDragon/cpython-3.11.zip" -OutFile "$envDir/cpython-3.11.zip"
 
-        # 将安装器复制到仓库根目录
+        # 将构建结果复制到仓库根目录
         Copy-Item "$distDir/OneDragon-Installer.exe" -Destination "OneDragon-Installer.exe" -Force
+        Copy-Item "$distDir/OneDragon-Launcher/OneDragon-Launcher.exe" -Destination "OneDragon-Launcher.exe" -Force
+        Copy-Item "$distDir/OneDragon-Launcher/.runtime/" -Destination ".runtime" -Recurse -Force
 
         # 打包启动器目录
         Compress-Archive -Path "$distDir/OneDragon-Launcher/*" -DestinationPath "$distDir/ZenlessZoneZero-OneDragon-Launcher.zip" -Force
@@ -447,7 +451,6 @@ jobs:
         files: |
           ZenlessZoneZero-OneDragon-${{ needs.build.outputs.version }}-Full.zip
           ZenlessZoneZero-OneDragon-${{ needs.build.outputs.version }}-Installer.exe
-          ZenlessZoneZero-OneDragon-Environment.zip
           ZenlessZoneZero-OneDragon-Launcher.zip
         generate_release_notes: false
         prerelease: ${{ contains(needs.build.outputs.version, '-beta.') }}
