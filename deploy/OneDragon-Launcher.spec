@@ -44,10 +44,7 @@ keep_modules = set()
 for tree_path in KEEP_TREES:
     # 添加路径本身
     keep_modules.add(tree_path)
-    # 添加所有父模块
-    parts = tree_path.split(".")
-    for i in range(1, len(parts) + 1):
-        keep_modules.add(".".join(parts[:i]))
+
     # 添加所有子模块
     keep_modules.update(m for m in all_src_modules if m.startswith(tree_path + "."))
 
