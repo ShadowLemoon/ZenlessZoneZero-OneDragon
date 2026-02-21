@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -15,6 +16,7 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     FluentIcon,
+    IndeterminateProgressBar,
     LineEdit,
     MessageBox,
     PixmapLabel,
@@ -185,6 +187,12 @@ class DirectoryPickerInterface(QWidget):
         self.progress_bar = ProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
+        self.indet_progress_bar = IndeterminateProgressBar()
+        # 用内层 stack 切换两种进度条，保证布局高度稳定
+        self.bar_stack = QStackedWidget()
+        self.bar_stack.addWidget(self.progress_bar)       # index 0: 复制阶段（确定进度）
+        self.bar_stack.addWidget(self.indet_progress_bar) # index 1: 清理阶段（不确定进度）
+        self.bar_stack.setCurrentIndex(0)
         # 第一行：正在复制 xx/xx（BodyLabel，字号稍大）
         self.count_label = BodyLabel(self.translator.get_text('preparing'))
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -192,9 +200,12 @@ class DirectoryPickerInterface(QWidget):
         self.status_label = CaptionLabel('')
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setWordWrap(False)
+        # 禁止 status_label 撑宽窗口；文本过长时 _on_unpack_log 会做 ElideMiddle
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.status_label.setMinimumWidth(0)
         pg_layout.addWidget(self.count_label)
         pg_layout.addSpacing(12)
-        pg_layout.addWidget(self.progress_bar)
+        pg_layout.addWidget(self.bar_stack)
         pg_layout.addSpacing(8)
         pg_layout.addWidget(self.status_label)
         pg_layout.addStretch(1)
@@ -290,16 +301,26 @@ class DirectoryPickerInterface(QWidget):
     def _on_unpack_log(self, message: str) -> None:
         """更新具体文件行，并缓存最后一条日志"""
         self._last_log = message
-        self.status_label.setText(message)
+        # ElideMiddle：超宽时中间省略为 "前…后"，不撑宽布局
+        avail = self.status_label.width()
+        if avail > 0:
+            elided = self.status_label.fontMetrics().elidedText(
+                message, Qt.TextElideMode.ElideMiddle, avail
+            )
+        else:
+            elided = message
+        self.status_label.setText(elided)
 
     def _on_unpack_progress(self, current: int, total: int) -> None:
         """更新进度条与计数行。current=-1 表示进入清理阶段。"""
         if current == -1:
-            # 清理阶段：条切为不确定模式，计数行提示清理，文件行置空
-            self.progress_bar.setRange(0, 0)
+            # 清理阶段：切换到动画进度条，计数行提示清理，文件行置空
+            self.bar_stack.setCurrentIndex(1)
+            self.indet_progress_bar.start()
             self.count_label.setText(self.translator.get_text('cleaning'))
             self.status_label.setText("")
         else:
+            self.bar_stack.setCurrentIndex(0)
             self.progress_bar.setRange(0, total)
             self.progress_bar.setValue(current)
             self.count_label.setText(self.translator.get_text('copying', current=current, total=total))
