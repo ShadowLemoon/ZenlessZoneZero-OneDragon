@@ -203,30 +203,66 @@ class UnpackResourceRunner(QThread):
 
     def run(self):
         """线程入口：若安装器目录与工作目录相同则视为已就位，否则执行清单搬运。"""
+        import datetime
+        # 优先写到 installer_dir（该目录必然存在），否则回退到当前目录
+        _log_dir = Path(self.installer_dir) if self.installer_dir else Path('.')
+        try:
+            _log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            _log_dir = Path('.')
+        _log_path = _log_dir / 'unpack_debug.log'
+
+        def _dbg(msg: str) -> None:
+            ts = datetime.datetime.now().strftime('%H:%M:%S.%f')
+            line = f"[{ts}] {msg}\n"
+            try:
+                with _log_path.open('a', encoding='utf-8') as f:
+                    f.write(line)
+            except Exception:
+                pass
+            self.log_message.emit(msg)
+
+        _dbg("=== UnpackResourceRunner.run() 开始 ===")
+        _dbg(f"installer_dir = {self.installer_dir!r}")
+        _dbg(f"work_dir      = {self.work_dir!r}")
+
         if self.installer_dir is None:
+            _dbg("installer_dir 为 None，跳过搬运，_finish(False)")
             self._finish(False)
             return
 
         src_root = Path(self.installer_dir)
         dst_root = Path(self.work_dir)
 
+        _dbg(f"src_root resolved = {src_root.resolve()}")
+        _dbg(f"dst_root resolved = {dst_root.resolve()}")
+
         # 安装器目录与工作目录相同，无需搬运，直接视为成功
         if self._is_same_dir(src_root, dst_root):
+            _dbg("两目录相同，跳过搬运，_finish(True)")
             self._finish(True)
             return
+
+        manifest_path = src_root / 'install_manifest.json'
+        _dbg(f"manifest 路径   = {manifest_path}")
+        _dbg(f"manifest 存在   = {manifest_path.exists()}")
 
         # 无清单说明安装目录不含待搬运资源（开发环境 / 在线安装等），视为无需解包
-        if not (src_root / 'install_manifest.json').exists():
+        if not manifest_path.exists():
+            _dbg("无清单，跳过搬运，_finish(True)")
             self._finish(True)
             return
 
+        _dbg("清单存在，开始搬运...")
         self.log_message.emit("正在读取安装清单...")
 
         # 逐文件复制+校验，成功后删除源文件；异常视为失败
         try:
             ok = self._copy_by_manifest_then_cleanup(src_root, dst_root)
+            _dbg(f"搬运结束，ok={ok}")
             self._finish(ok)
         except Exception as e:
+            _dbg(f"解包资源失败: {e}")
             self.log_message.emit(f"解包资源失败: {e}")
             self._finish(False)
 
