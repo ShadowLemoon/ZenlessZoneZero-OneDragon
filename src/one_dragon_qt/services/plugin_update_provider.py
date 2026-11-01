@@ -45,6 +45,9 @@ class PluginUpdateProvider(PluginOperationMixin, QObject):
 
     def check_update(self) -> bool:
         """读取插件市场，判断是否有已订阅的插件可更新。在后台线程调用。"""
+        if not self.ctx.env_config.plugin_update_notify:
+            self._pending = []
+            return False
         snapshot = self.market_service.load()
         self._market_snapshot = snapshot
         pending: list[tuple[MarketPlugin, PluginInfo]] = []
@@ -53,6 +56,8 @@ class PluginUpdateProvider(PluginOperationMixin, QObject):
                 continue
             entry = self.find_market_entry(plugin_info)
             if entry is None or not self.pending_update_version(plugin_info, entry):
+                continue
+            if self.subscription_config.is_update_muted(entry.plugin_id):
                 continue
             pending.append((entry, plugin_info))
         self._pending = pending

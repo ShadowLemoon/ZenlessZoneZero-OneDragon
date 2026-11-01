@@ -56,8 +56,10 @@ from one_dragon_qt.services.plugin_cover_service import (
 )
 from one_dragon_qt.view.plugin.plugin_detail_dialog import (
     ACTION_IGNORE,
+    ACTION_MUTE_UPDATE,
     ACTION_SUBSCRIBE,
     ACTION_UNINSTALL,
+    ACTION_UNMUTE_UPDATE,
     ACTION_UNSUBSCRIBE,
     ACTION_UPDATE,
     PluginDetailData,
@@ -384,6 +386,7 @@ class PluginOperationMixin:
                 status_text += gt('，可更新到 v{version}').format(version=update_version)
                 actions.append((ACTION_UPDATE, gt('更新到 v{version}').format(version=update_version)))
                 actions.append((ACTION_IGNORE, gt('跳过此版本')))
+            actions.append(self._mute_action(entry))
             actions.append((ACTION_UNSUBSCRIBE, gt('取消订阅')))
         elif plugin_info is not None:
             status_text = gt('已安装 · 未从商店订阅')
@@ -417,6 +420,12 @@ class PluginOperationMixin:
         )
         self._show_detail(data, partial(self._on_detail_action, entry, plugin_info))
 
+    def _mute_action(self, entry: MarketPlugin) -> tuple[str, str]:
+        """单插件更新提示开关对应的详情页按钮。"""
+        if self.subscription_config.is_update_muted(entry.plugin_id):
+            return ACTION_UNMUTE_UPDATE, gt('恢复更新提示')
+        return ACTION_MUTE_UPDATE, gt('不再提示此插件的更新')
+
     def open_installed_detail(self, plugin_info: PluginInfo) -> None:
         """打开本机已安装插件的详情页。"""
         entry = self.find_market_entry(plugin_info)
@@ -431,6 +440,8 @@ class PluginOperationMixin:
                 status_text += gt('，可更新到 v{version}').format(version=update_version)
                 actions.append((ACTION_UPDATE, gt('更新到 v{version}').format(version=update_version)))
                 actions.append((ACTION_IGNORE, gt('跳过此版本')))
+            if entry is not None:
+                actions.append(self._mute_action(entry))
             actions.append((ACTION_UNSUBSCRIBE, gt('取消订阅')))
             if entry is None:
                 status_text = gt('已订阅 · 商店暂无此插件')
@@ -503,6 +514,21 @@ class PluginOperationMixin:
                 isClosable=True,
                 position=InfoBarPosition.TOP,
                 duration=2500,
+                parent=self._as_widget(),
+            )
+        elif action in (ACTION_MUTE_UPDATE, ACTION_UNMUTE_UPDATE) and entry is not None:
+            muted = action == ACTION_MUTE_UPDATE
+            self.subscription_config.set_update_muted(entry.plugin_id, muted)
+            InfoBar.success(
+                title=gt('已关闭更新提示') if muted else gt('已恢复更新提示'),
+                content=(
+                    gt('{name} 的更新不再在启动时弹窗提示，卡片上仍会显示可更新')
+                    if muted else gt('{name} 的更新会在启动时提示')
+                ).format(name=entry.name),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
                 parent=self._as_widget(),
             )
         # 弹窗在动作发出时已经关闭，这里不再操作界面
