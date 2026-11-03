@@ -32,9 +32,11 @@ from one_dragon.utils.file_utils import find_src_dir
 from one_dragon.utils.log_utils import log
 from one_dragon.utils.plugin_module_loader import (
     FACTORY_FILE_NAME,
+    find_git_repo,
     has_factory_and_const,
     is_const_file,
     is_factory_file,
+    list_repo_plugin_dirs,
 )
 
 if TYPE_CHECKING:
@@ -281,7 +283,7 @@ class PluginImportService:
         try:
             target_dir = self._get_target_dir(plugin_name)
             # 目录里只有残留文件、连插件结构都不成立时，说明没装成，直接清掉重装
-            leftover = self._path_exists(target_dir) and not has_factory_and_const(target_dir)
+            leftover = self._is_leftover_dir(target_dir)
             if self._path_exists(target_dir) and not overwrite and not leftover:
                 return ImportResult(
                     success=False,
@@ -636,7 +638,7 @@ class PluginImportService:
         try:
             target_dir = self._get_target_dir(plugin_name)
             # 目录里只有残留文件、连插件结构都不成立时，说明没装成，直接清掉重装
-            leftover = self._path_exists(target_dir) and not has_factory_and_const(target_dir)
+            leftover = self._is_leftover_dir(target_dir)
             if self._path_exists(target_dir) and not overwrite and not leftover:
                 return ImportResult(
                     success=False,
@@ -861,6 +863,31 @@ class PluginImportService:
             raise ValueError("插件目标路径不是目录")
         return target_dir
 
+    def _is_leftover_dir(self, target_dir: Path) -> bool:
+        """目录是否只剩安装失败的残留文件，可以直接清掉重装。
+
+        只有目录存在、没有 .git、自己不是插件、其下一层也没有仓库布局的插件时才算残留；
+        拿不准（读目录出错等）一律按已安装处理，走“已存在，询问覆盖”。
+        """
+        try:
+            if not self._path_exists(target_dir) or target_dir.is_symlink() or not target_dir.is_dir():
+                return False
+            if find_git_repo(target_dir) is not None:
+                return False
+            if has_factory_and_const(target_dir):
+                return False
+            if list_repo_plugin_dirs(target_dir):
+                return False
+            # 文件名大小写不同的 factory / const 之类，保守按已安装处理
+            return not any(
+                child.suffix.lower() == '.py' and (
+                    'factory' in child.name.lower() or 'const' in child.name.lower()
+                )
+                for child in target_dir.iterdir()
+            )
+        except OSError:
+            return False
+
     def _new_staging_dir(self, plugin_dir_name: str) -> Path:
         """创建同一文件系统中的临时目录路径。"""
         plugins_root = self._plugins_root()
@@ -877,6 +904,11 @@ class PluginImportService:
                 raise ValueError("插件目标目录不能是符号链接")
             if not target_dir.is_dir():
                 raise ValueError("插件目标路径不是目录")
+            git_dir = find_git_repo(target_dir)
+            if git_dir is not None:
+                raise ValueError(
+                    f"插件目录含 git 仓库（{git_dir.name}），不能覆盖安装，请用 git 更新"
+                )
             backup_dir = target_dir.with_name(f".{target_dir.name}.backup-{uuid4().hex}")
             target_dir.replace(backup_dir)
 
@@ -936,6 +968,14 @@ class PluginImportService:
                 success=False,
                 plugin_name=plugin_name,
                 message="只能删除插件目录",
+            )
+
+        git_dir = find_git_repo(plugin_dir_resolved)
+        if git_dir is not None:
+            return ImportResult(
+                success=False,
+                plugin_name=plugin_name,
+                message=f"插件目录含 git 仓库（{git_dir.name}），不能在这里删除，请手动处理",
             )
 
         try:
