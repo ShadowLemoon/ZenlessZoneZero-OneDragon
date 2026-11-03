@@ -866,25 +866,16 @@ class PluginImportService:
     def _is_leftover_dir(self, target_dir: Path) -> bool:
         """目录是否只剩安装失败的残留文件，可以直接清掉重装。
 
-        只有目录存在、没有 .git、自己不是插件、其下一层也没有仓库布局的插件时才算残留；
-        拿不准（读目录出错等）一律按已安装处理，走“已存在，询问覆盖”。
+        判断标准和插件加载一致：能被识别为可工作的插件（扁平插件，或仓库布局下有插件）
+        就是已安装；识别不出任何插件才算残留。带 .git 的目录不自动清理；
+        读目录出错时拿不准，按已安装处理，走“已存在，询问覆盖”。
         """
         try:
             if not self._path_exists(target_dir) or target_dir.is_symlink() or not target_dir.is_dir():
                 return False
             if find_git_repo(target_dir) is not None:
                 return False
-            if has_factory_and_const(target_dir):
-                return False
-            if list_repo_plugin_dirs(target_dir):
-                return False
-            # 文件名大小写不同的 factory / const 之类，保守按已安装处理
-            return not any(
-                child.suffix.lower() == '.py' and (
-                    'factory' in child.name.lower() or 'const' in child.name.lower()
-                )
-                for child in target_dir.iterdir()
-            )
+            return not has_factory_and_const(target_dir) and not list_repo_plugin_dirs(target_dir)
         except OSError:
             return False
 
