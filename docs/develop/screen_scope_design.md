@@ -177,21 +177,21 @@ class Application(Operation):
 
 ### 加载机制
 
-插件的 screen 通过 `OneDragonContext._load_plugin_screens()` 自动加载：
+插件的 screen 由 `ScreenContext.reload()` 自动注入。`OneDragonContext` 在构造时通过
+`screen_loader.set_extra_screen_source(self._plugin_screen_dirs)` 提供来源：每次 reload 都按
+`plugin_infos` 重新取各插件的画面目录（const 中的 `SCREEN_INFO_DIR`，默认 `screen_info`，
+须为相对路径）和 app_id，调用方无需在 reload 之后再手动注入。
 
 ```
-OneDragonContext.init()
-├── register_application_factory()    ← 扫描插件，填充 plugin_infos
-├── screen_loader.reload()            ← 加载主 screen YAML
-└── _load_plugin_screens()            ← 遍历 plugin_infos → load_extra_screen_dir()
-    └── 对每个插件的 screen_info/ 目录加载 YAML
+OneDragonContext.init() / refresh_application_registration()
+├── 扫描插件，填充 plugin_infos
+└── screen_loader.reload()            ← 主 screen YAML + 插件 screen 一并加载
+    └── 对每个插件的 SCREEN_INFO_DIR 目录加载 YAML
         └── 未设 app_id 的 screen 自动使用插件的 app_id
-
-refresh_application_registration()    ← 运行时刷新插件
-├── clear_applications + discover_factories    ← 重新扫描
-├── screen_loader.reload()            ← 重新加载主 YAML
-└── _load_plugin_screens()            ← 重新加载插件 screen
 ```
+
+`reload(from_memory=True)` 只重建派生结构，插件画面本就留在内存里，不会重复注入。
+卸载插件即该插件从 `plugin_infos` 消失，下一次 reload 画面自然不再出现。
 
 ### 插件目录结构
 
@@ -235,7 +235,7 @@ area_list:
 | 文件 | 变更 |
 |------|------|
 | `src/one_dragon/base/screen/screen_info.py` | `ScreenInfo` 新增 `app_id` 字段 |
-| `src/one_dragon/base/screen/screen_loader.py` | `ScreenContext` 新增 scope 管理 API 和 `load_extra_screen_dir` |
+| `src/one_dragon/base/screen/screen_loader.py` | `ScreenContext` 新增 scope 管理 API、`load_extra_screen_dir` 和 `set_extra_screen_source` |
 | `src/one_dragon/base/screen/screen_utils.py` | BFS 匹配适配活跃范围 |
 | `src/one_dragon/base/operation/application_base.py` | `Application` 生命周期自动 enter/exit scope |
-| `src/one_dragon/base/operation/one_dragon_context.py` | 新增 `_load_plugin_screens()`，init 和 refresh 时加载插件 screen |
+| `src/one_dragon/base/operation/one_dragon_context.py` | 新增 `_plugin_screen_dirs()` 作为插件画面来源 |

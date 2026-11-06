@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -51,6 +52,8 @@ class ScreenContext:
         self._id_2_screen: dict[str, ScreenInfo] = {}
         self._extra_screen_ids: set[str] = set()
         self._extra_screen_file_path_map: dict[str, Path] = {}
+        self._extra_screen_source: Callable[[], list[tuple[Path, str]]] | None = None
+        """插件画面来源：返回 [(画面目录, 默认 app_id)]，每次 reload 都会重新读取"""
         self.screen_route_map: dict[str, dict[str, ScreenRoute]] = {}
 
         self.last_screen_name: str | None = None  # 上一个画面名字
@@ -71,6 +74,14 @@ class ScreenContext:
 
     def get_yml_file_path(self, screen_id: str) -> Path:
         return self.yml_file_dir / f'{screen_id}.yml'
+
+    def set_extra_screen_source(self, source: Callable[[], list[tuple[Path, str]]] | None) -> None:
+        """设置插件画面来源，之后每次非 from_memory 的 reload 都会按它注入插件画面
+
+        Args:
+            source: 返回 [(画面目录, 默认 app_id)] 的函数；None 表示不注入
+        """
+        self._extra_screen_source = source
 
     def reload(self, from_memory: bool = False, from_separated_files: bool = False) -> None:
         """
@@ -155,6 +166,10 @@ class ScreenContext:
                 for screen_area in screen_info.area_list:
                     self._screen_area_map[f'{screen_info.screen_name}.{screen_area.area_name}'] = screen_area
 
+        if not from_memory and self._extra_screen_source is not None:
+            for dir_path, default_app_id in self._extra_screen_source():
+                self._add_extra_screen_dir(dir_path, default_app_id)
+
         self.init_screen_route()
 
         # 自动计算全局 screen：没有 app_id 的 screen 为全局
@@ -171,9 +186,21 @@ class ScreenContext:
             dir_path: 包含 screen YAML 文件的目录路径
             default_app_id: 如果 YAML 中未设置 app_id，使用此默认值
         """
+        if self._add_extra_screen_dir(dir_path, default_app_id):
+            self.init_screen_route()
+            self._global_screen_names = {
+                s.screen_name for s in self.screen_info_list if not s.app_id
+            }
+
+    def _add_extra_screen_dir(self, dir_path: str | Path, default_app_id: str = '') -> bool:
+        """把目录下的 screen YAML 注册进内存，不重算路由和全局集合
+
+        Returns:
+            是否新增了画面
+        """
         screen_dir = Path(dir_path)
         if not screen_dir.is_dir():
-            return
+            return False
 
         added = False
         for file_path in screen_dir.iterdir():
@@ -207,11 +234,7 @@ class ScreenContext:
                 self._screen_area_map[f'{screen_info.screen_name}.{screen_area.area_name}'] = screen_area
             added = True
 
-        if added:
-            self.init_screen_route()
-            self._global_screen_names = {
-                s.screen_name for s in self.screen_info_list if not s.app_id
-            }
+        return added
 
     def get_screen(self, screen_name: str, copy: bool = False) -> ScreenInfo:
         """
