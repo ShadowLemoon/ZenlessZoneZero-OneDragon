@@ -21,10 +21,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
-from one_dragon.base.config.plugin_subscription_config import (
-    PluginSubscriptionConfig,
-    get_plugin_subscription_config,
-)
+from one_dragon.base.config.plugin_subscription_config import PluginSubscriptionConfig
 from one_dragon.base.operation.application.plugin_import_service import (
     ImportResult,
     PluginImportService,
@@ -34,30 +31,29 @@ from one_dragon.base.operation.application.plugin_market import (
     MarketPlugin,
     MarketSnapshot,
     PluginMarketService,
-    get_plugin_market_service,
 )
 from one_dragon.base.operation.one_dragon_context import OneDragonContext
 from one_dragon.base.web.common_downloader import (
-    GITHUB_SOURCE_ID,
     CommonDownloader,
     CommonDownloaderParam,
 )
 from one_dragon.utils import os_utils
 from one_dragon.utils.i18_utils import gt
 from one_dragon.utils.log_utils import log
+from one_dragon.utils.plugin_module_loader import find_git_repo
 from one_dragon_qt.services.download_queue_service import (
     DownloadQueueService,
     ResourceDownloadSpec,
     ResourceDownloadTaskState,
 )
-from one_dragon_qt.services.plugin_cover_service import (
-    PluginCoverService,
-    get_plugin_cover_service,
-)
+from one_dragon_qt.services.plugin_cover_service import PluginCoverService
 from one_dragon_qt.view.plugin.plugin_detail_dialog import (
+    ACTION_CONFIG,
     ACTION_IGNORE,
+    ACTION_MUTE_UPDATE,
     ACTION_SUBSCRIBE,
     ACTION_UNINSTALL,
+    ACTION_UNMUTE_UPDATE,
     ACTION_UNSUBSCRIBE,
     ACTION_UPDATE,
     PluginDetailData,
@@ -191,13 +187,14 @@ class PluginOperationMixin:
     def init_plugin_operation(
         self,
         ctx: OneDragonContext,
+        cover_service: PluginCoverService,
     ) -> None:
         """初始化共用状态，由页面构造函数调用。"""
+        self.cover_service = cover_service
         self.ctx = ctx
         self.plugin_import_service = PluginImportService(ctx)
-        self.market_service = get_plugin_market_service()
-        self.subscription_config = get_plugin_subscription_config()
-        self.cover_service = get_plugin_cover_service()
+        self.market_service = ctx.plugin_market_service
+        self.subscription_config = ctx.plugin_subscription_config
         self._cards_by_key: dict[str, PluginCard] = {}
         self._cover_urls: dict[str, str] = {}
         self._market_snapshot: MarketSnapshot | None = None
@@ -384,6 +381,7 @@ class PluginOperationMixin:
                 status_text += gt('，可更新到 v{version}').format(version=update_version)
                 actions.append((ACTION_UPDATE, gt('更新到 v{version}').format(version=update_version)))
                 actions.append((ACTION_IGNORE, gt('跳过此版本')))
+            actions.append(self._mute_action(plugin_info))
             actions.append((ACTION_UNSUBSCRIBE, gt('取消订阅')))
         elif plugin_info is not None:
             status_text = gt('已安装 · 未从商店订阅')
@@ -391,6 +389,7 @@ class PluginOperationMixin:
             actions.append((ACTION_UNINSTALL, gt('卸载')))
         else:
             actions.append((ACTION_SUBSCRIBE, gt('订阅')))
+        self._append_config_action(actions, plugin_info)
 
         meta_parts = []
         if entry.latest_version:
@@ -417,6 +416,54 @@ class PluginOperationMixin:
         )
         self._show_detail(data, partial(self._on_detail_action, entry, plugin_info))
 
+    def subscription_registry_id(self, plugin_info: PluginInfo) -> str:
+        """已安装插件在订阅记录里的市场条目 id，没有订阅记录时返回空字符串。"""
+        package_dir = self.get_plugin_package_dir(plugin_info)
+        dir_name = package_dir.name if package_dir is not None else ''
+        return self.subscription_config.find_registry_id(plugin_info.app_id, dir_name) or ''
+
+    def _mute_action(self, plugin_info: PluginInfo) -> tuple[str, str]:
+        """单插件更新提示开关对应的详情页按钮。"""
+        if self.subscription_config.is_update_muted(self.subscription_registry_id(plugin_info)):
+            return ACTION_UNMUTE_UPDATE, gt('恢复更新提示')
+        return ACTION_MUTE_UPDATE, gt('不再提示此插件的更新')
+
+    def _append_config_action(
+        self,
+        actions: list[tuple[str, str]],
+        plugin_info: PluginInfo | None,
+    ) -> None:
+        """插件自带设置界面（注册了 *_app_setting.py）时，在操作区追加「设置」按钮。"""
+        if plugin_info is None:
+            return
+        manager = self._app_setting_manager()
+        if manager is not None and plugin_info.app_id in manager.settable_app_ids:
+            actions.append((ACTION_CONFIG, gt('设置')))
+
+    def _app_setting_manager(self):
+        """从主窗口取应用设置管理器，窗口未就绪时返回 None。"""
+        window = self._as_widget().window()
+        return getattr(window, 'app_setting_manager', None)
+
+    def _open_plugin_config(self, plugin_info: PluginInfo) -> None:
+        """打开插件自带的设置界面。
+
+        由 app_setting_manager 分发：INTERFACE 型推入插件页的二级导航
+        （插件页本身是 PivotNavigatorInterface），FLYOUT 型弹在页面中央。
+        """
+        from one_dragon.base.operation.application import application_const
+
+        manager = self._app_setting_manager()
+        if manager is None:
+            return
+        widget = self._as_widget()
+        manager.show_app_setting(
+            app_id=plugin_info.app_id,
+            parent=widget,
+            group_id=application_const.DEFAULT_GROUP_ID,
+            target=widget,
+        )
+
     def open_installed_detail(self, plugin_info: PluginInfo) -> None:
         """打开本机已安装插件的详情页。"""
         entry = self.find_market_entry(plugin_info)
@@ -431,6 +478,8 @@ class PluginOperationMixin:
                 status_text += gt('，可更新到 v{version}').format(version=update_version)
                 actions.append((ACTION_UPDATE, gt('更新到 v{version}').format(version=update_version)))
                 actions.append((ACTION_IGNORE, gt('跳过此版本')))
+            if entry is not None:
+                actions.append(self._mute_action(plugin_info))
             actions.append((ACTION_UNSUBSCRIBE, gt('取消订阅')))
             if entry is None:
                 status_text = gt('已订阅 · 商店暂无此插件')
@@ -441,6 +490,7 @@ class PluginOperationMixin:
             )
             status_kind = BADGE_INSTALLED
             actions.append((ACTION_UNINSTALL, gt('卸载')))
+        self._append_config_action(actions, plugin_info)
 
         meta_parts = []
         if plugin_info.version:
@@ -505,6 +555,26 @@ class PluginOperationMixin:
                 duration=2500,
                 parent=self._as_widget(),
             )
+        elif action == ACTION_CONFIG and plugin_info is not None:
+            self._open_plugin_config(plugin_info)
+        elif action in (ACTION_MUTE_UPDATE, ACTION_UNMUTE_UPDATE) and plugin_info is not None:
+            muted = action == ACTION_MUTE_UPDATE
+            registry_id = self.subscription_registry_id(plugin_info)
+            if not registry_id or not self.subscription_config.set_update_muted(registry_id, muted):
+                self._show_error(gt('设置失败'), gt('找不到该插件的订阅记录'))
+                return
+            InfoBar.success(
+                title=gt('已关闭更新提示') if muted else gt('已恢复更新提示'),
+                content=(
+                    gt('{name} 的更新不再在启动时弹窗提示，卡片上仍会显示可更新')
+                    if muted else gt('{name} 的更新会在启动时提示')
+                ).format(name=plugin_info.app_name),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self._as_widget(),
+            )
         # 弹窗在动作发出时已经关闭，这里不再操作界面
 
     # ------------------------------------------------------------------
@@ -512,7 +582,9 @@ class PluginOperationMixin:
     # ------------------------------------------------------------------
 
     def subscribe(self, entry: MarketPlugin) -> None:
-        """订阅一个市场条目：把插件包放进统一下载队列，下完再安装。"""
+        """订阅一个市场条目：先让用户确认第三方插件风险，再放进统一下载队列，下完再安装。"""
+        if not self._confirm_third_party_risk(entry):
+            return
         self._enqueue_plugin_download(
             entry,
             overwrite=False,
@@ -520,9 +592,31 @@ class PluginOperationMixin:
             current_version='',
         )
 
+    def _confirm_third_party_risk(self, entry: MarketPlugin) -> bool:
+        """订阅前的风险确认。商店里的第三方插件没有经过官方审查。
+
+        Returns:
+            用户确认继续返回 True。
+        """
+        msg_box = MessageBox(
+            gt('第三方插件风险提示'),
+            gt(
+                '"{name}" 是第三方作者发布的插件，未经过官方审查。\n'
+                '插件会以与本程序相同的权限运行，可以读写本机文件、访问网络，'
+                '存在恶意代码、隐私泄露或损坏系统的风险。\n'
+                '请只订阅你信任的作者发布的插件，确定要继续吗？'
+            ).format(name=entry.name),
+            self._as_widget().window(),
+        )
+        msg_box.yesButton.setText(gt('我已了解风险，继续订阅'))
+        msg_box.cancelButton.setText(gt('取消'))
+        return bool(msg_box.exec())
+
     def update_plugin(self, entry: MarketPlugin, plugin_info: PluginInfo) -> None:
         """把已安装插件更新到市场最新版本，下载走统一队列。"""
         action_name = gt('更新')
+        if self._reject_repo_layout_plugin(plugin_info, action_name):
+            return
         package_dir = self.get_plugin_package_dir(plugin_info)
         if package_dir is not None and self.is_plugin_running(package_dir):
             self._show_error(
@@ -537,6 +631,54 @@ class PluginOperationMixin:
             current_version=plugin_info.version or '',
             package_dir=package_dir,
         )
+
+    def build_plugin_spec(
+        self,
+        entry: MarketPlugin,
+        overwrite: bool,
+        action_name: str,
+        current_version: str,
+        package_dir: Path | None = None,
+    ) -> tuple[ResourceDownloadSpec | None, str]:
+        """构造插件包的下载规格，供下载队列与统一更新弹窗共用。
+
+        Returns:
+            (规格, 错误文案)。无法构造时规格为 None。
+        """
+        release = entry.latest
+        if release is None or not release.sources:
+            return None, gt('该插件没有可下载的版本')
+        if not release.sha256:
+            return None, gt('该插件没有提供校验值，无法确认安装包未被篡改')
+
+        archive_name = self._plugin_archive_name(entry)
+        save_dir = os_utils.get_path_under_work_dir('config', 'temp', 'plugin_downloads')
+        # 不指定源顺序，交给下载队列按「资源」页的设置挑选
+        download_urls = dict(release.sources)
+        spec = ResourceDownloadSpec(
+            resource_id=f'plugin:{entry.plugin_id}',
+            resource_type='plugin',
+            title=entry.name,
+            current_version=current_version,
+            target_version=entry.latest_version or archive_name,
+            downloader_factory=lambda: CommonDownloader(
+                CommonDownloaderParam(
+                    save_file_path=save_dir,
+                    save_file_name=archive_name,
+                    download_urls=download_urls,
+                )
+            ),
+            note=action_name,
+            after_download=lambda success: self._install_queued_plugin(
+                entry,
+                overwrite,
+                action_name,
+                Path(save_dir) / archive_name,
+                success,
+                package_dir,
+            ),
+        )
+        return spec, ''
 
     def _enqueue_plugin_download(
         self,
@@ -557,18 +699,15 @@ class PluginOperationMixin:
         """
         if self._import_busy:
             return
-        release = entry.latest
-        if release is None or not release.download_url:
-            self._show_error(
-                gt('无法{action}').format(action=action_name),
-                gt('该插件没有可下载的版本'),
-            )
-            return
-        if not release.sha256:
-            self._show_error(
-                gt('无法{action}').format(action=action_name),
-                gt('该插件没有提供校验值，无法确认安装包未被篡改'),
-            )
+        spec, error = self.build_plugin_spec(
+            entry,
+            overwrite,
+            action_name,
+            current_version,
+            package_dir,
+        )
+        if spec is None:
+            self._show_error(gt('无法{action}').format(action=action_name), error)
             return
 
         queue = self._download_queue()
@@ -576,33 +715,6 @@ class PluginOperationMixin:
             self._show_error(gt('无法{action}').format(action=action_name), gt('下载队列不可用'))
             return
 
-        archive_name = self._plugin_archive_name(entry)
-        save_dir = os_utils.get_path_under_work_dir('config', 'temp', 'plugin_downloads')
-        source_id = self._plugin_download_source(release.download_url)
-        spec = ResourceDownloadSpec(
-            resource_id=f'plugin:{entry.plugin_id}',
-            resource_type='plugin',
-            title=entry.name,
-            current_version=current_version,
-            target_version=entry.latest_version or archive_name,
-            downloader_factory=lambda: CommonDownloader(
-                CommonDownloaderParam(
-                    save_file_path=save_dir,
-                    save_file_name=archive_name,
-                    download_urls={source_id: release.download_url},
-                )
-            ),
-            source_order=[source_id],
-            note=action_name,
-            after_download=lambda success: self._install_queued_plugin(
-                entry,
-                overwrite,
-                action_name,
-                Path(save_dir) / archive_name,
-                success,
-                package_dir,
-            ),
-        )
         active_states = {
             ResourceDownloadTaskState.WAITING,
             ResourceDownloadTaskState.DOWNLOADING,
@@ -633,14 +745,6 @@ class PluginOperationMixin:
         show_tip = getattr(window, 'show_download_queue_added_tip', None)
         if callable(show_tip):
             show_tip(title)
-
-    @staticmethod
-    def _plugin_download_source(download_url: str) -> str:
-        """GitHub 地址走统一源的代理规则，其他地址按直链下载。"""
-        lowered = download_url.casefold()
-        if 'github.com/' in lowered or 'githubusercontent.com' in lowered:
-            return GITHUB_SOURCE_ID
-        return 'direct'
 
     @staticmethod
     def _plugin_archive_name(entry: MarketPlugin) -> str:
@@ -768,6 +872,43 @@ class PluginOperationMixin:
                 return plugin_info.app_id
         return ''
 
+    def _reject_repo_layout_plugin(self, plugin_info: PluginInfo, action_name: str) -> bool:
+        """仓库布局的插件（plugins/<仓库>/<插件>/）和带 git 仓库的插件不能由这里删除或覆盖。
+
+        卸载和更新都是按 plugins 下的顶层目录整体删除或替换，对仓库布局会连
+        仓库里的 .git 和未提交的开发文件一起处理掉，所以直接拒绝并提示手动处理。
+
+        Args:
+            plugin_info: 插件信息。
+            action_name: 操作名，用于提示文案。
+
+        Returns:
+            True 表示已拒绝并弹出提示，调用方应直接返回。
+        """
+        if plugin_info.plugin_dir is None:
+            return False
+        plugins_root = self.plugin_import_service.plugins_dir.resolve(strict=False)
+        plugin_dir = plugin_info.plugin_dir.resolve(strict=False)
+        if not plugin_dir.is_relative_to(plugins_root) or plugin_dir == plugins_root:
+            return False
+        top_dir = plugins_root / plugin_dir.relative_to(plugins_root).parts[0]
+        git_dir = find_git_repo(top_dir)
+        if git_dir is not None:
+            self._show_error(
+                gt('无法{action}').format(action=action_name),
+                gt('该插件目录含 git 仓库，请用 git 管理：{path}').format(path=git_dir),
+            )
+            return True
+        if plugin_dir.parent == plugins_root:
+            return False
+        self._show_error(
+            gt('无法{action}').format(action=action_name),
+            gt('该插件位于源码仓库目录中，请在 plugins 目录里手动处理仓库：{path}').format(
+                path=plugin_dir.parent
+            ),
+        )
+        return True
+
     def unsubscribe(
         self,
         plugin_info: PluginInfo,
@@ -776,6 +917,8 @@ class PluginOperationMixin:
     ) -> None:
         """删除插件目录。订阅来的插件文案用取消订阅，本地安装用卸载。"""
         if self._import_busy:
+            return
+        if self._reject_repo_layout_plugin(plugin_info, gt('卸载')):
             return
 
         if subscribed is None:

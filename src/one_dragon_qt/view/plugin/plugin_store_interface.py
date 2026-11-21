@@ -13,6 +13,7 @@ from PySide6.QtGui import QCloseEvent, QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
+    CheckBox,
     FluentIcon,
     LineEdit,
     PushButton,
@@ -26,6 +27,7 @@ from one_dragon.base.operation.application.plugin_market import (
 )
 from one_dragon.base.operation.one_dragon_context import OneDragonContext
 from one_dragon.utils.i18_utils import gt
+from one_dragon_qt.services.plugin_cover_service import PluginCoverService
 from one_dragon_qt.view.plugin.plugin_operation_mixin import PluginOperationMixin
 from one_dragon_qt.widgets.plugin_card import (
     BADGE_INSTALLED,
@@ -45,9 +47,10 @@ class PluginStoreInterface(PluginOperationMixin, VerticalScrollInterface):
     def __init__(
         self,
         ctx: OneDragonContext,
+        cover_service: PluginCoverService,
         parent: QWidget | None = None,
     ) -> None:
-        self.init_plugin_operation(ctx)
+        self.init_plugin_operation(ctx, cover_service)
 
         VerticalScrollInterface.__init__(
             self,
@@ -75,6 +78,11 @@ class PluginStoreInterface(PluginOperationMixin, VerticalScrollInterface):
         self.search_edit.textChanged.connect(self._on_search_changed)
         layout.addWidget(self.search_edit, 1)
 
+        self.notify_check = CheckBox(gt('启动时提示插件更新'), top)
+        self.notify_check.setChecked(self.ctx.env_config.plugin_update_notify)
+        self.notify_check.stateChanged.connect(self._on_notify_changed)
+        layout.addWidget(self.notify_check)
+
         self.refresh_btn = PushButton(FluentIcon.SYNC, gt('刷新'), top)
         self.refresh_btn.clicked.connect(self._on_refresh_clicked)
         layout.addWidget(self.refresh_btn)
@@ -86,6 +94,14 @@ class PluginStoreInterface(PluginOperationMixin, VerticalScrollInterface):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+
+        self.risk_label = CaptionLabel(
+            gt('商店中的第三方插件未经官方审查，订阅前请确认来源可信，风险自负'),
+            content,
+        )
+        self.risk_label.setTextColor('#c42b1c', '#ff99a4')
+        self.risk_label.setWordWrap(True)
+        layout.addWidget(self.risk_label)
 
         self.status_label = CaptionLabel(content)
         self.status_label.setTextColor('#8a8a8a', '#9a9a9a')
@@ -250,6 +266,14 @@ class PluginStoreInterface(PluginOperationMixin, VerticalScrollInterface):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.update_paging()
+
+    def _on_notify_changed(self, _state: int) -> None:
+        """把复选框状态写入全局的插件更新提示设置。
+
+        Args:
+            _state: 复选框状态，实际取值以控件当前勾选为准。
+        """
+        self.ctx.env_config.plugin_update_notify = self.notify_check.isChecked()
 
     def _on_search_changed(self, text: str) -> None:
         self.set_card_filter(text)
