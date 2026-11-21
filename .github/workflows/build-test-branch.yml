@@ -39,7 +39,6 @@ env:
 jobs:
   build-test-branch:
     runs-on: windows-latest
-    if: ${{ github.repository_owner == 'OneDragon-Anything' }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
