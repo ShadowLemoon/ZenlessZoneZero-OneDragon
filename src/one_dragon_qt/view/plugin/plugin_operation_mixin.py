@@ -187,6 +187,12 @@ class MarketLoadRunner(QObject):
         self.load_finished.emit(self._service.load(force=self._force))
 
 
+class _RefreshBridge(QObject):
+    """把注册刷新完成事件转成 Qt 信号，保证重建卡片在界面线程执行。"""
+
+    requested = Signal()
+
+
 class PluginOperationMixin:
     """插件页面共用的订阅与详情逻辑。
 
@@ -215,12 +221,18 @@ class PluginOperationMixin:
         self._market_snapshot: MarketSnapshot | None = None
         self._market_runner: MarketLoadRunner | None = None
         self._import_busy: bool = False
-        # 注册刷新完成后重建卡片：推迟刷新结束时页面没有别的时机知道插件已经换了
-        ctx.listen_event(ContextPluginRefreshEvent.EVENT_ID, self._on_registration_refreshed)
 
     def _on_registration_refreshed(self, event: ContextEventItem | None = None) -> None:
-        """注册刷新完成：切回界面线程重建卡片。事件回调跑在事件线程池里。"""
-        QTimer.singleShot(0, self._as_widget(), self.refresh_cards)
+        """注册刷新完成：通过队列信号切回界面线程。事件回调可能跑在事件线程池里。"""
+        bridge = getattr(self, '_refresh_bridge', None)
+        if bridge is not None:
+            bridge.requested.emit()
+
+    def _rebuild_cards_if_ready(self) -> None:
+        """重建卡片。页面内容还没构建（从未显示过）时跳过，显示时自己会重建。"""
+        if getattr(self, 'card_grid', None) is None:
+            return
+        self.refresh_cards()
 
     # ------------------------------------------------------------------
     # 由子类实现
@@ -528,21 +540,11 @@ class PluginOperationMixin:
         summary = plugin_info.description
         if copy is not None:
             # 同 ID 的开发版与商店版并存：只加载一份，详情页提供切换
-            active_is_dev = plugin_info.is_dev
-            status_text = f"{gt('当前使用开发版') if active_is_dev else gt('当前使用商店版')} · {status_text}"
-            if active_is_dev:
+            if plugin_info.is_dev:
+                status_text = f"{gt('开发版')} · {status_text}"
                 actions.append((ACTION_SWITCH_TO_MARKET, gt('切换到商店版')))
             else:
                 actions.append((ACTION_SWITCH_TO_DEV, gt('切换到开发版')))
-            active_label, other_label = (
-                (gt('开发版'), gt('商店版')) if active_is_dev else (gt('商店版'), gt('开发版'))
-            )
-            summary = (
-                f'{summary}\n\n' if summary else ''
-            ) + (
-                f'{active_label}（使用中）v{plugin_info.version or "?"}：{plugin_info.plugin_dir}\n'
-                f'{other_label} v{copy.version or "?"}：{copy.plugin_dir}'
-            )
 
         meta_parts = []
         if plugin_info.version:
@@ -585,7 +587,7 @@ class PluginOperationMixin:
             title=gt('已切换到{label}').format(label=label) if refreshed else gt('已推迟切换'),
             content=(
                 plugin_info.app_name if refreshed
-                else gt('有任务正在运行，将在任务结束后切换到{label}').format(label=label)
+                else gt('任务结束后生效')
             ),
             orient=Qt.Horizontal,
             isClosable=True,
@@ -1396,6 +1398,16 @@ class PluginOperationMixin:
         self.cover_service.cover_ready.connect(
             self._on_cover_ready,
             Qt.ConnectionType.QueuedConnection,
+        )
+        # 注册刷新完成后重建卡片：推迟刷新结束时页面没有别的时机知道插件已经换了。
+        # 事件可能来自非界面线程，经队列信号回到界面线程
+        self._refresh_bridge = _RefreshBridge(self._as_widget())
+        self._refresh_bridge.requested.connect(
+            self._rebuild_cards_if_ready,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.ctx.listen_event(
+            ContextPluginRefreshEvent.EVENT_ID, self._on_registration_refreshed
         )
 
     def _on_cover_ready(self, plugin_id: str) -> None:

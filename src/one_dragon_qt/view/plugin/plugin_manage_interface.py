@@ -178,14 +178,10 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 meta_parts.append(plugin_info.author)
             copy = plugin_info.inactive_copy
             if copy is not None:
-                meta_parts.append(
-                    gt('另有{kind}{version}').format(
-                        kind=gt('开发版') if copy.source == PluginSource.DEV else gt('商店版'),
-                        version=f' v{copy.version}' if copy.version else '',
-                    )
-                )
+                other = gt('开发版') if copy.source == PluginSource.DEV else gt('商店版')
+                meta_parts.append(f'{other} v{copy.version}' if copy.version else other)
 
-            plugin_id =entry.plugin_id if entry is not None else plugin_info.app_id
+            plugin_id = entry.plugin_id if entry is not None else plugin_info.app_id
             card = self.make_card(
                 title=plugin_info.app_name,
                 meta_text=' · '.join(meta_parts),

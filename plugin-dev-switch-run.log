@@ -1,0 +1,24 @@
+[00:58:03.977] [overlay_manager.py 247] [INFO]: Overlay 已启用，等待游戏窗口可用后显示
+[00:58:04.974] [application_factory_manager.py 144] [INFO]: 发现 20 个默认组应用, 2 个独立应用, 11 个固定入口应用, 0 个失败
+[00:58:04.994] [git_service.py 188] [INFO]: Git fetch 超时设置: server_connect_timeout=30000ms, server_timeout=30000ms
+[00:58:05.614] [git_service.py 1852] [INFO]: 标签查询使用代码源: GitHub
+[00:58:05.964] [git_service.py 1770] [INFO]: 获取commit 第1页
+[00:59:10.387] [one_dragon_context.py 607] [INFO]: 已取消下载OCR模型 使用OCR时将重新下载
+[00:59:10.517] [one_dragon_context.py 569] [INFO]: 开始加载实例配置 1
+[00:59:11.213] [git_service.py 1712] [INFO]: 检测当前代码分支
+[00:59:11.459] [app_setting_manager.py 163] [INFO]: 发现 14 个应用设置提供者
+[00:59:49.230] [http_utils.py 132] [INFO]: 开始下载 https://onedragon-anyone.github.io/plugin-data/api/v1/plugins.json
+[00:59:50.365] [http_utils.py 115] [INFO]: 正在下载 0.19/0.23 MB (81.73%)
+[00:59:50.407] [http_utils.py 173] [INFO]: 下载完成 D:\Code\ZenlessZoneZero-OneDragon\.pai\.worktree\plugin-dev-switch\config\temp\plugin_market.json
+[00:59:58.064] [one_dragon_context.py 356] [INFO]: 开始刷新应用注册...
+[00:59:58.207] [application_factory_manager.py 144] [INFO]: 发现 20 个默认组应用, 2 个独立应用, 11 个固定入口应用, 0 个失败
+[00:59:58.314] [one_dragon_context.py 393] [INFO]: 应用注册刷新完成
+[00:59:58.414] [app_setting_manager.py 163] [INFO]: 发现 14 个应用设置提供者
+Error calling Python override of QDialog::eventFilter(): Traceback (most recent call last):
+  File "D:\Code\ZenlessZoneZero-OneDragon\.venv\Lib\site-packages\qfluentwidgets\components\dialog_box\mask_dialog_base.py", line 97, in eventFilter
+    if obj is self.window():
+              ^^^^^^^^^^^
+  File "D:\Code\ZenlessZoneZero-OneDragon\.pai\.worktree\plugin-dev-switch\src\one_dragon_qt\view\plugin\plugin_store_interface.py", line 172, in refresh_cards
+    self.card_grid.clear()
+    ^^^^^^^^^^^^^^
+AttributeError: 'PluginStoreInterface' object has no attribute 'card_grid'
