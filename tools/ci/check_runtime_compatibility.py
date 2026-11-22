@@ -116,7 +116,7 @@ def _latest_stable_release(token: str) -> tuple[str, str]:
     raise RuntimeError('发布列表中没有正式版')
 
 
-def target_manifest_bytes(repository_root: Path) -> bytes:
+def _target_manifest(repository_root: Path) -> bytes:
     """按当前项目配置读取源码清单，不执行清单代码。"""
     import yaml
 
@@ -339,7 +339,7 @@ def main() -> int:
             package.extractall(runtime_root)
 
     target_manifest = work_dir / 'target_module_manifest.py'
-    target_manifest.write_bytes(target_manifest_bytes(repository_root))
+    target_manifest.write_bytes(_target_manifest(repository_root))
     result = _check_with_runtime(
         runtime_root,
         repository_root,
