@@ -548,9 +548,7 @@ class PluginOperationMixin:
             else:
                 actions.append((ACTION_SWITCH_TO_DEV, gt('切换到开发版')))
 
-        meta_parts = []
-        if plugin_info.version:
-            meta_parts.append(f'v{plugin_info.version}')
+        meta_parts = self.version_meta_parts(plugin_info)
         if plugin_info.author:
             meta_parts.append(plugin_info.author)
 
@@ -572,6 +570,27 @@ class PluginOperationMixin:
             actions=actions,
         )
         self._show_detail(data, partial(self._on_detail_action, entry, plugin_info))
+
+    @staticmethod
+    def version_meta_parts(plugin_info: PluginInfo) -> list[str]:
+        """卡片和详情页的版本号写法，明确哪份是开发版、哪份正在使用。
+
+        - 同 ID 两份并存：`使用开发版 v2.0 · 商店版 v1.0`，前一项是正在使用的
+        - 只有开发版：`开发版 v0.1`
+        - 其余：`v1.0`
+        """
+
+        def label(source: PluginSource, version: str) -> str:
+            name = gt('开发版') if source == PluginSource.DEV else gt('商店版')
+            return f'{name} v{version}' if version else name
+
+        copy = plugin_info.inactive_copy
+        if copy is not None:
+            current = label(plugin_info.source, plugin_info.version)
+            return [f"{gt('使用')}{current}", label(copy.source, copy.version)]
+        if plugin_info.source == PluginSource.DEV:
+            return [label(plugin_info.source, plugin_info.version)]
+        return [f'v{plugin_info.version}'] if plugin_info.version else []
 
     def switch_plugin_copy(self, plugin_info: PluginInfo, use_dev: bool) -> None:
         """同 ID 的开发版与商店版并存时，切换加载哪一份。

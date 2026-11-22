@@ -29,7 +29,7 @@ from one_dragon.base.operation.application.plugin_import_service import (
     ImportResult,
     PluginPreviewInfo,
 )
-from one_dragon.base.operation.application.plugin_info import PluginInfo, PluginSource
+from one_dragon.base.operation.application.plugin_info import PluginInfo
 from one_dragon.base.operation.one_dragon_context import OneDragonContext
 from one_dragon.utils.i18_utils import gt
 from one_dragon.utils.log_utils import log
@@ -171,15 +171,9 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 badge_text = gt('已安装')
                 badge_kind = BADGE_INSTALLED
 
-            meta_parts = []
-            if plugin_info.version:
-                meta_parts.append(f'v{plugin_info.version}')
+            meta_parts = self.version_meta_parts(plugin_info)
             if plugin_info.author:
                 meta_parts.append(plugin_info.author)
-            copy = plugin_info.inactive_copy
-            if copy is not None:
-                other = gt('开发版') if copy.source == PluginSource.DEV else gt('商店版')
-                meta_parts.append(f'{other} v{copy.version}' if copy.version else other)
 
             plugin_id = entry.plugin_id if entry is not None else plugin_info.app_id
             card = self.make_card(
