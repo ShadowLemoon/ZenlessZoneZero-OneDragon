@@ -224,7 +224,6 @@ class PluginOperationMixin:
         self._market_runner: MarketLoadRunner | None = None
         self._import_busy: bool = False
         self._detail_open: bool = False
-        self._switching: bool = False
 
     def _on_registration_refreshed(self, event: ContextEventItem | None = None) -> None:
         """注册刷新完成：通过队列信号切回界面线程。事件回调可能跑在事件线程池里。"""
@@ -589,15 +588,27 @@ class PluginOperationMixin:
             plugin_info: 当前生效的插件信息。
             use_dev: True 切到开发版，False 切到商店版。
         """
-        if self._switching:
+        if self._import_busy:
             return
-        self._switching = True
-        try:
-            self.ctx.env_config.set_plugin_use_dev(plugin_info.app_id, use_dev)
-            # 立即刷新时，卡片由 ContextPluginRefreshEvent 触发重建，这里不重复重建
-            refreshed = self.ctx.request_application_registration_refresh()
-        finally:
-            self._switching = False
+        self.ctx.env_config.set_plugin_use_dev(plugin_info.app_id, use_dev)
+        # 重新扫描并导入插件模块比较耗时，放后台线程，界面不卡；
+        # 刷新完成后卡片由 ContextPluginRefreshEvent 触发重建
+        self._start_plugin_task(
+            self.ctx.request_application_registration_refresh,
+            partial(self._finish_switch_copy, plugin_info, use_dev),
+        )
+
+    def _finish_switch_copy(
+        self, plugin_info: PluginInfo, use_dev: bool, refreshed: bool
+    ) -> None:
+        """切换的后台刷新结束：提示切换结果。
+
+        Args:
+            plugin_info: 切换前生效的插件信息。
+            use_dev: True 切到了开发版，False 切到了商店版。
+            refreshed: 是否已经立即刷新；有任务运行时为 False，任务结束后才生效。
+        """
+        self._finish_plugin_task()
         label = gt('开发版') if use_dev else gt('商店版')
         InfoBar.success(
             title=gt('已切换到{label}').format(label=label) if refreshed else gt('已推迟切换'),
