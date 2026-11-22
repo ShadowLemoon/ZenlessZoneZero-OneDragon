@@ -221,6 +221,8 @@ class PluginOperationMixin:
         self._market_snapshot: MarketSnapshot | None = None
         self._market_runner: MarketLoadRunner | None = None
         self._import_busy: bool = False
+        self._detail_open: bool = False
+        self._switching: bool = False
 
     def _on_registration_refreshed(self, event: ContextEventItem | None = None) -> None:
         """注册刷新完成：通过队列信号切回界面线程。事件回调可能跑在事件线程池里。"""
@@ -578,10 +580,15 @@ class PluginOperationMixin:
             plugin_info: 当前生效的插件信息。
             use_dev: True 切到开发版，False 切到商店版。
         """
-        self.ctx.env_config.set_plugin_use_dev(plugin_info.app_id, use_dev)
-        refreshed = self.ctx.request_application_registration_refresh()
-        if refreshed:
-            self.refresh_cards()
+        if self._switching:
+            return
+        self._switching = True
+        try:
+            self.ctx.env_config.set_plugin_use_dev(plugin_info.app_id, use_dev)
+            # 立即刷新时，卡片由 ContextPluginRefreshEvent 触发重建，这里不重复重建
+            refreshed = self.ctx.request_application_registration_refresh()
+        finally:
+            self._switching = False
         label = gt('开发版') if use_dev else gt('商店版')
         InfoBar.success(
             title=gt('已切换到{label}').format(label=label) if refreshed else gt('已推迟切换'),
@@ -602,9 +609,21 @@ class PluginOperationMixin:
         action_handler: Callable[[str], None],
     ) -> None:
         """以弹窗形式展示插件详情。"""
-        detail = PluginDetailDialog(data, parent=self._as_widget().window())
-        detail.action_triggered.connect(action_handler)
-        detail.exec()
+        if self._detail_open:
+            # 刷新期间界面卡顿，排队的重复点击不能再叠一个弹窗
+            return
+        self._detail_open = True
+        actions: list[str] = []
+        try:
+            detail = PluginDetailDialog(data, parent=self._as_widget().window())
+            detail.action_triggered.connect(actions.append)
+            detail.exec()
+        finally:
+            self._detail_open = False
+        # 等弹窗完全退出（卡片的点击回调也已返回）再处理动作：
+        # 动作可能重建卡片，不能在弹窗的嵌套事件循环里销毁正在处理点击的卡片
+        for action in actions:
+            action_handler(action)
 
     def _on_detail_action(
         self,
