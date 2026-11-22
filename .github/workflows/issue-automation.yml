@@ -7,7 +7,6 @@ on:
 jobs:
   process_issue:
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'OneDragon-Anything' }}
     permissions:
       contents: read
       issues: write
