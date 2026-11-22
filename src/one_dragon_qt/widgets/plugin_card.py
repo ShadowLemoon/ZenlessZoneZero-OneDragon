@@ -632,7 +632,9 @@ class PluginCardGrid(QWidget):
         """移除并销毁全部卡片。"""
         for card in self._cards:
             self._layout.removeWidget(card)
-            card.setParent(None)
+            # 先显式隐藏再销毁，不要 setParent(None)：新建的卡片加入布局时 Qt 会排队一次
+            # 「显示」，若此时卡片已被摘成无父控件，排队的显示会让它弹成独立窗口
+            card.hide()
             card.deleteLater()
         self._cards.clear()
 

@@ -235,6 +235,14 @@ class PluginOperationMixin:
         """重建卡片。页面内容还没构建（从未显示过）时跳过，显示时自己会重建。"""
         if getattr(self, 'card_grid', None) is None:
             return
+        # 短时间内连续的刷新完成事件合并成一次重建，避免卡片被反复销毁和创建
+        if getattr(self, '_rebuild_scheduled', False):
+            return
+        self._rebuild_scheduled = True
+        QTimer.singleShot(0, self._as_widget(), self._run_scheduled_rebuild)
+
+    def _run_scheduled_rebuild(self) -> None:
+        self._rebuild_scheduled = False
         self.refresh_cards()
 
     # ------------------------------------------------------------------
@@ -913,6 +921,8 @@ class PluginOperationMixin:
                 _plugin_write_lock.release()
             if not result.success:
                 raise RuntimeError(result.message or '导入插件失败')
+            # 重新扫描并导入插件模块比较耗时，在后台线程里完成，界面线程只处理结果
+            self.ctx.request_application_registration_refresh()
         finally:
             archive.unlink(missing_ok=True)
 
@@ -950,7 +960,6 @@ class PluginOperationMixin:
             )
             return
 
-        self.ctx.request_application_registration_refresh()
         for result in success_results:
             package_dir = self._find_package_dir_of_result(result)
             app_id = self._find_app_id_by_package(package_dir)
@@ -1077,9 +1086,21 @@ class PluginOperationMixin:
             return
 
         self._start_plugin_task(
-            lambda: self.plugin_import_service.delete_plugin(plugin_package_dir),
+            partial(self._delete_and_refresh, plugin_package_dir, False),
             partial(self._finish_unsubscribe, plugin_info, registry_id, subscribed),
         )
+
+    def _delete_and_refresh(self, package_dir: Path, backup_git: bool) -> ImportResult:
+        """后台线程：删除插件目录，成功后重新加载应用注册（耗时操作不占界面线程）。
+
+        Args:
+            package_dir: 要删除的插件包目录。
+            backup_git: 目录含 git 仓库时是否改名为备份目录而不是拒绝。
+        """
+        result = self.plugin_import_service.delete_plugin(package_dir, backup_git=backup_git)
+        if result.success:
+            self.ctx.request_application_registration_refresh()
+        return result
 
     def _finish_unsubscribe(
         self,
@@ -1105,7 +1126,6 @@ class PluginOperationMixin:
             if found:
                 self.subscription_config.remove_record(found)
 
-        self.ctx.request_application_registration_refresh()
         self.refresh_cards()
         InfoBar.success(
             title=gt('已取消订阅') if subscribed else gt('已卸载'),
@@ -1190,7 +1210,7 @@ class PluginOperationMixin:
             return
 
         self._start_plugin_task(
-            lambda: self.plugin_import_service.delete_plugin(package_dir, backup_git=True),
+            partial(self._delete_and_refresh, package_dir, True),
             partial(self._finish_delete_failed, package_dir),
         )
 
@@ -1209,7 +1229,6 @@ class PluginOperationMixin:
         found = self.subscription_config.find_registry_id('', package_dir.name)
         if found:
             self.subscription_config.remove_record(found)
-        self.ctx.request_application_registration_refresh()
         self.refresh_cards()
         InfoBar.success(
             title=gt('已删除'),

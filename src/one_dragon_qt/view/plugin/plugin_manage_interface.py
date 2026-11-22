@@ -607,16 +607,10 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
         success_count = sum(1 for result in results if result.success)
         fail_count = len(results) - success_count
         if success_count > 0:
-            self.ctx.request_application_registration_refresh()
-            self.refresh_cards()
-            InfoBar.success(
-                title=gt('导入成功'),
-                content=gt('成功导入 {count} 个插件').format(count=success_count),
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=3000,
-                parent=self
+            # 重新扫描并导入插件模块比较耗时，放后台线程，界面不卡
+            self._start_plugin_task(
+                self.ctx.request_application_registration_refresh,
+                partial(self._finish_import_refresh, success_count),
             )
 
         if fail_count > 0:
@@ -634,6 +628,20 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 duration=5000,
                 parent=self
             )
+
+    def _finish_import_refresh(self, success_count: int, _refreshed: bool) -> None:
+        """导入后的后台刷新结束：重建卡片并提示导入成功。"""
+        self._finish_plugin_task()
+        self.refresh_cards()
+        InfoBar.success(
+            title=gt('导入成功'),
+            content=gt('成功导入 {count} 个插件').format(count=success_count),
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+            parent=self,
+        )
 
     def _on_refresh_clicked(self) -> None:
         """刷新按钮点击"""
