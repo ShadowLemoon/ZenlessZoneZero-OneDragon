@@ -32,7 +32,6 @@ from one_dragon.base.operation.application.plugin_import_service import (
 from one_dragon.base.operation.application.plugin_info import PluginInfo
 from one_dragon.base.operation.one_dragon_context import OneDragonContext
 from one_dragon.utils.i18_utils import gt
-from one_dragon.utils.log_utils import log
 from one_dragon_qt.view.plugin.plugin_operation_mixin import PluginOperationMixin
 from one_dragon_qt.widgets.plugin_card import (
     BADGE_FAILED,
@@ -641,28 +640,33 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
         if self._import_busy:
             return
 
-        try:
-            refreshed = self.ctx.request_application_registration_refresh()
-            if refreshed:
-                # 立即刷新已完成，同步重建卡片；推迟的情况不读旧状态，
-                # 等应用结束后 ContextPluginRefreshEvent 到达再重建
-                self.refresh_cards()
-            self.load_market(force=True)
-            InfoBar.success(
-                title=gt('刷新成功') if refreshed else gt('已推迟刷新'),
-                content=(
-                    gt('已重新加载插件') if refreshed
-                    else gt('有任务正在运行，插件将在任务结束后重新加载')
-                ),
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-                parent=self
-            )
-        except Exception as e:
-            log.error(f'刷新插件失败: {e}', exc_info=True)
-            self._show_error(gt('刷新失败'), str(e))
+        # 重新扫描并导入插件模块比较耗时，放后台线程，界面不卡；
+        # 刷新完成后卡片由 ContextPluginRefreshEvent 触发重建，推迟的情况不读旧状态
+        self._start_plugin_task(
+            self.ctx.request_application_registration_refresh,
+            self._finish_refresh_clicked,
+        )
+
+    def _finish_refresh_clicked(self, refreshed: bool) -> None:
+        """刷新按钮的后台刷新结束：重新加载市场并提示结果。
+
+        Args:
+            refreshed: 是否已经立即刷新；有任务运行时为 False，任务结束后才生效。
+        """
+        self._finish_plugin_task()
+        self.load_market(force=True)
+        InfoBar.success(
+            title=gt('刷新成功') if refreshed else gt('已推迟刷新'),
+            content=(
+                gt('已重新加载插件') if refreshed
+                else gt('有任务正在运行，插件将在任务结束后重新加载')
+            ),
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=2000,
+            parent=self,
+        )
 
     def _on_open_dir_clicked(self) -> None:
         """打开插件目录"""
