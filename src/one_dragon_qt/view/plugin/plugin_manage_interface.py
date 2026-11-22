@@ -39,6 +39,8 @@ from one_dragon_qt.widgets.plugin_card import (
     BADGE_INSTALLED,
     BADGE_SUBSCRIBED,
     BADGE_UPDATE,
+    CHANNEL_DEV,
+    CHANNEL_MARKET,
     PluginCard,
     PluginCardGrid,
     PluginPager,
@@ -158,10 +160,7 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 subscribed_count += 1
             if update_version:
                 update_count += 1
-            if plugin_info.is_dev:
-                badge_text = gt('开发版')
-                badge_kind = BADGE_INSTALLED
-            elif update_version:
+            if update_version:
                 badge_text = gt('可更新 v{version}').format(version=update_version)
                 badge_kind = BADGE_UPDATE
             elif subscribed:
@@ -171,7 +170,9 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 badge_text = gt('已安装')
                 badge_kind = BADGE_INSTALLED
 
-            meta_parts = self.version_meta_parts(plugin_info)
+            meta_parts = []
+            if plugin_info.version:
+                meta_parts.append(f'v{plugin_info.version}')
             if plugin_info.author:
                 meta_parts.append(plugin_info.author)
 
@@ -190,6 +191,10 @@ class PluginManageInterface(PluginOperationMixin, VerticalScrollInterface):
                 on_click=partial(self.open_installed_detail, plugin_info),
                 parent=self.card_grid,
             )
+            if plugin_info.is_dev:
+                card.set_channels(CHANNEL_DEV, both=plugin_info.has_both_copies)
+            elif plugin_info.has_both_copies:
+                card.set_channels(CHANNEL_MARKET, both=True)
             self.remember_card(
                 card, plugin_id, entry.cover_url if entry is not None else ''
             )

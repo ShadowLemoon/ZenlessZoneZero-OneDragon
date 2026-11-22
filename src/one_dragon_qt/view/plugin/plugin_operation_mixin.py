@@ -82,6 +82,8 @@ from one_dragon_qt.widgets.plugin_card import (
     BADGE_UPDATE,
     CARD_HEIGHT,
     CARD_WIDTH,
+    CHANNEL_DEV,
+    CHANNEL_MARKET,
     PluginCard,
     PluginCardGrid,
     PluginPager,
@@ -539,16 +541,23 @@ class PluginOperationMixin:
         self._append_config_action(actions, plugin_info)
 
         copy = plugin_info.inactive_copy
-        summary = plugin_info.description
+        channels: list[tuple[str, str]] = []
+        channel_current = ''
         if copy is not None:
-            # 同 ID 的开发版与商店版并存：只加载一份，详情页提供切换
-            if plugin_info.is_dev:
-                status_text = f"{gt('开发版')} · {status_text}"
-                actions.append((ACTION_SWITCH_TO_MARKET, gt('切换到商店版')))
-            else:
-                actions.append((ACTION_SWITCH_TO_DEV, gt('切换到开发版')))
+            # 同 ID 的开发版与商店版并存：只加载一份，详情页顶部的分段控件切换
+            dev_version, market_version = (
+                (plugin_info.version, copy.version)
+                if plugin_info.is_dev else (copy.version, plugin_info.version)
+            )
+            channels = [
+                (CHANNEL_MARKET, f"{gt('商店版')} v{market_version}" if market_version else gt('商店版')),
+                (CHANNEL_DEV, f"{gt('开发版')} v{dev_version}" if dev_version else gt('开发版')),
+            ]
+            channel_current = CHANNEL_DEV if plugin_info.is_dev else CHANNEL_MARKET
 
-        meta_parts = self.version_meta_parts(plugin_info)
+        meta_parts = []
+        if plugin_info.version:
+            meta_parts.append(f'v{plugin_info.version}')
         if plugin_info.author:
             meta_parts.append(plugin_info.author)
 
@@ -557,7 +566,7 @@ class PluginOperationMixin:
             initial=self.initial_of(plugin_info.app_name),
             meta_text=' · '.join(meta_parts),
             tags=[],
-            summary=summary,
+            summary=plugin_info.description,
             readme_html=entry.readme_html if entry is not None else '',
             changelog_html=(
                 entry.latest.changelog_html
@@ -568,29 +577,10 @@ class PluginOperationMixin:
             status_kind=status_kind,
             homepage=plugin_info.homepage,
             actions=actions,
+            channels=channels,
+            channel_current=channel_current,
         )
         self._show_detail(data, partial(self._on_detail_action, entry, plugin_info))
-
-    @staticmethod
-    def version_meta_parts(plugin_info: PluginInfo) -> list[str]:
-        """卡片和详情页的版本号写法，明确哪份是开发版、哪份正在使用。
-
-        - 同 ID 两份并存：`使用开发版 v2.0 · 商店版 v1.0`，前一项是正在使用的
-        - 只有开发版：`开发版 v0.1`
-        - 其余：`v1.0`
-        """
-
-        def label(source: PluginSource, version: str) -> str:
-            name = gt('开发版') if source == PluginSource.DEV else gt('商店版')
-            return f'{name} v{version}' if version else name
-
-        copy = plugin_info.inactive_copy
-        if copy is not None:
-            current = label(plugin_info.source, plugin_info.version)
-            return [f"{gt('使用')}{current}", label(copy.source, copy.version)]
-        if plugin_info.source == PluginSource.DEV:
-            return [label(plugin_info.source, plugin_info.version)]
-        return [f'v{plugin_info.version}'] if plugin_info.version else []
 
     def switch_plugin_copy(self, plugin_info: PluginInfo, use_dev: bool) -> None:
         """同 ID 的开发版与商店版并存时，切换加载哪一份。
