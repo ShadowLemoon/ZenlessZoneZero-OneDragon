@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from check_runtime_compatibility import target_manifest_bytes
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SQUASH_SOURCE_PATTERN = re.compile(
     r"^Squashed from PR: https://(?:redirect\.)?github\.com/[^/]+/[^/]+/pull/([0-9]+) .*",
@@ -17,6 +20,15 @@ SQUASH_SOURCE_PATTERN = re.compile(
 )
 MAIN_BRANCH = "main"
 RUNTIME_CHECK_DIR = REPO_ROOT / ".install" / "runtime-compatibility"
+RUNTIME_COMPATIBILITY_SOURCE = REPO_ROOT / "src" / "one_dragon" / "envs" / "runtime_compatibility.py"
+
+# 同一次运行内 test 与 test-integrated 共用：PR 信息、已拉取的 PR 引用、作者信息、兼容性结果。
+_pr_info_cache: dict[str, PrInfo | None] = {}
+_fetched_prs: set[str] = set()
+_authors_cache: dict[str, list[str]] = {}
+_github_author_cache: dict[tuple[str, tuple[str, ...]], str] = {}
+_compatibility_cache: dict[str, bool] = {}
+_main_fetched = False
 
 
 @dataclass(frozen=True)
@@ -194,6 +206,13 @@ def resolve_prs(input_prs: str, include_label: str) -> tuple[list[str], str, boo
 
 
 def get_pr_info(pr: str) -> PrInfo | None:
+    """读取 PR 信息；同一次运行内两个分支共用，保证看到同一个 head SHA。"""
+    if pr not in _pr_info_cache:
+        _pr_info_cache[pr] = _fetch_pr_info(pr)
+    return _pr_info_cache[pr]
+
+
+def _fetch_pr_info(pr: str) -> PrInfo | None:
     """一次读取 PR 状态、标题、标签、发起人、目标分支和 head SHA。"""
     result = run_command(
         [
@@ -332,6 +351,13 @@ def build_conflict_report(
 
 
 def get_commit_authors(pr_ref: str) -> list[str]:
+    """按提交顺序读取并去重 PR 中的作者，结果在同一次运行内复用。"""
+    if pr_ref not in _authors_cache:
+        _authors_cache[pr_ref] = _read_commit_authors(pr_ref)
+    return list(_authors_cache[pr_ref])
+
+
+def _read_commit_authors(pr_ref: str) -> list[str]:
     """按提交顺序读取并去重 PR 中的作者。"""
     result = run_command(
         [
@@ -356,7 +382,15 @@ def get_commit_authors(pr_ref: str) -> list[str]:
 
 
 def get_github_author(login: str, authors: list[str]) -> str:
-    """多作者 PR 使用发起人的 GitHub noreply 身份。"""
+    """多作者 PR 使用发起人的 GitHub noreply 身份，结果在同一次运行内复用。"""
+    key = (login, tuple(authors))
+    if key not in _github_author_cache:
+        _github_author_cache[key] = _resolve_github_author(login, authors)
+    return _github_author_cache[key]
+
+
+def _resolve_github_author(login: str, authors: list[str]) -> str:
+    """查询发起人的 GitHub noreply 身份。"""
     if login:
         result = run_command(
             ["gh", "api", f"users/{login}"],
@@ -506,11 +540,41 @@ def maintain_conflict_labels(
         )
 
 
+def get_compatibility_key() -> str | None:
+    """计算兼容性检查的输入指纹；读取失败时返回 None，表示不使用缓存。
+
+    检查只比较目标清单与运行时内置清单新增的导入，并用仓库里的
+    `runtime_compatibility.py` 判断导入是否可用，所以输入就是这两个文件。
+    """
+    try:
+        manifest = target_manifest_bytes(REPO_ROOT)
+        checker = RUNTIME_COMPATIBILITY_SOURCE.read_bytes()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    digest = hashlib.sha256()
+    for part in (manifest, checker):
+        digest.update(hashlib.sha256(part).digest())
+    return digest.hexdigest()
+
+
 def check_runtime_compatibility() -> bool | None:
     """检查当前工作区代码是否兼容最新正式版 RuntimeLauncher。
 
     返回 True 兼容，False 不兼容，None 表示检查本身失败。
+    清单和检查代码都没变时，直接沿用同一次运行内的上一次结果。
     """
+    key = get_compatibility_key()
+    if key is not None and key in _compatibility_cache:
+        print("兼容性检查输入未变化,沿用本次运行内的上一次结果")
+        return _compatibility_cache[key]
+    compatible = _run_runtime_compatibility_check()
+    if key is not None and compatible is not None:
+        _compatibility_cache[key] = compatible
+    return compatible
+
+
+def _run_runtime_compatibility_check() -> bool | None:
+    """实际运行一次兼容性检查进程。"""
     result = run_command(
         [
             sys.executable,
@@ -542,7 +606,11 @@ def rebuild_test_branch(
     integrated: bool = False,
 ) -> int:
     """从 main 重建目标测试分支，并逐个 squash 指定 PR。"""
-    run_command(["git", "fetch", "origin", MAIN_BRANCH])
+    global _main_fetched
+    if not _main_fetched:
+        # 两个分支基于同一个 main 提交，只拉取一次。
+        run_command(["git", "fetch", "origin", MAIN_BRANCH])
+        _main_fetched = True
     run_command(
         ["git", "checkout", "-B", target_branch, f"origin/{MAIN_BRANCH}"]
     )
@@ -572,19 +640,21 @@ def rebuild_test_branch(
         if require_label and include_label not in info.labels:
             continue
         pr_ref = f"refs/remotes/pr/{pr}"
-        fetch_result = run_command(
-            [
-                "git",
-                "fetch",
-                "origin",
-                f"refs/pull/{pr}/head:{pr_ref}",
-                "--force",
-            ],
-            check=False,
-        )
-        if fetch_result.returncode != 0:
-            skipped.append(SkippedPr(pr, "拉取 PR 分支失败"))
-            continue
+        if pr not in _fetched_prs:
+            fetch_result = run_command(
+                [
+                    "git",
+                    "fetch",
+                    "origin",
+                    f"refs/pull/{pr}/head:{pr_ref}",
+                    "--force",
+                ],
+                check=False,
+            )
+            if fetch_result.returncode != 0:
+                skipped.append(SkippedPr(pr, "拉取 PR 分支失败"))
+                continue
+            _fetched_prs.add(pr)
         fetched_head_sha = get_full_sha(pr_ref)
         if not info.head_sha or fetched_head_sha != info.head_sha:
             skipped.append(SkippedPr(pr, "PR 在读取信息后发生更新"))
